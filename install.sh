@@ -87,12 +87,18 @@ fi
 
 mkdir -p build && cd build
 
-log "Running CMake (with CUDA + video support)..."
+# Nettoyer les anciens caches CMake pour garantir une config fraîche
+log "Cleaning build directory..."
+rm -rf *
+
+log "Running CMake (with CUDA support, C++17, no video)..."
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_STANDARD=17 \
+    -DCMAKE_CUDA_STANDARD=17 \
     -DAC_CORE_WITH_CUDA=ON \
     -DAC_BUILD_CLI=ON \
-    -DAC_BUILD_VIDEO=ON \
+    -DAC_BUILD_VIDEO=OFF \
     -DAC_BUILD_GUI=OFF \
     -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90"
 
