@@ -56,6 +56,17 @@ def check_disk_space() -> str | None:
     return None
 
 
+def check_nvenc() -> bool:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0 and "h264_nvenc" in result.stdout
+    except Exception:
+        return False
+
+
 def run_health_checks() -> dict:
     errors = []
     for name, exe in [("Anime4KCPP", "ac_cli"), ("FFmpeg", "ffmpeg")]:
@@ -75,6 +86,13 @@ def run_health_checks() -> dict:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
+_NVENC_AVAILABLE = check_nvenc()
+if _NVENC_AVAILABLE:
+    logger.info("NVENC hardware encoder available")
+else:
+    logger.warning("NVENC not available, falling back to libx264 (CPU encoding)")
+
+
 app = FastAPI(title="Anime4K Web Upscaler")
 
 UPLOAD_DIR = Path("uploads")
@@ -85,6 +103,32 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
 
 jobs: dict[str, dict] = {}
+
+# --- HPC tuning (auto-detect VRAM) ---
+
+def _get_vram_gb() -> int:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip().split("\n")[0]) // 1024
+    except Exception:
+        pass
+    return 8  # safe default
+
+
+VRAM_GB = _get_vram_gb()
+CONCURRENCY = min(64, max(8, VRAM_GB // 3))  # 64 on H200, 8 on 8 GB cards
+logger.info(f"GPU VRAM: {VRAM_GB} GB | Upscale concurrency: {CONCURRENCY}")
+
+WORK_DIR = Path("/dev/shm")
+if not WORK_DIR.exists():
+    WORK_DIR = OUTPUT_DIR
+    logger.info("Using disk-based temp dirs (no /dev/shm available)")
+else:
+    logger.info("Using RAM-based /dev/shm for temp frames (fast I/O)")
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +156,8 @@ async def process_video(task_id: str, input_path: str, mode: str, model: str):
 
         factor = 2 if mode == "hd" else 4
         audio_track = str(OUTPUT_DIR / f"{task_id}_audio.aac")
-        frames_dir = Path(OUTPUT_DIR) / f"{task_id}_frames"
-        upscaled_dir = Path(OUTPUT_DIR) / f"{task_id}_frames_up"
+        frames_dir = WORK_DIR / f"{task_id}_frames"
+        upscaled_dir = WORK_DIR / f"{task_id}_frames_up"
         final_output = str(OUTPUT_DIR / f"{task_id}_upscaled.mp4")
 
         # --- Step 1: Extract audio + get video info ---
@@ -204,15 +248,28 @@ async def process_video(task_id: str, input_path: str, mode: str, model: str):
             "-i", str(upscaled_dir / "%06d.png"),
         ]
 
-        if has_audio:
-            encode_cmd += ["-i", audio_track]
-            encode_cmd += [
+        # Build encode params based on NVENC availability
+        if _NVENC_AVAILABLE:
+            video_params = [
                 "-c:v", "h264_nvenc",
                 "-preset", "p1",
                 "-tune", "hq",
                 "-rc", "vbr",
                 "-cq", "19",
                 "-b:v", "0",
+            ]
+            logger.info("Using NVENC hardware encoder")
+        else:
+            video_params = [
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "18",
+            ]
+            logger.info("Using libx264 CPU encoder")
+
+        if has_audio:
+            encode_cmd += ["-i", audio_track]
+            encode_cmd += video_params + [
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-b:a", "192k",
@@ -222,13 +279,7 @@ async def process_video(task_id: str, input_path: str, mode: str, model: str):
                 final_output,
             ]
         else:
-            encode_cmd += [
-                "-c:v", "h264_nvenc",
-                "-preset", "p1",
-                "-tune", "hq",
-                "-rc", "vbr",
-                "-cq", "19",
-                "-b:v", "0",
+            encode_cmd += video_params + [
                 "-pix_fmt", "yuv420p",
                 "-map", "0:v:0",
                 final_output,
