@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anime4K Upscaler</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f0f14;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+
+  .drop-zone {
+    width: 100%;
+    max-width: 600px;
+    border: 2px dashed #333;
+    border-radius: 16px;
+    padding: 60px 30px;
+    text-align: center;
+    transition: border-color 0.2s, background 0.2s;
+    cursor: pointer;
+  }
+  .drop-zone.dragover { border-color: #7c5cfc; background: rgba(124,92,252,0.06); }
+  .drop-zone.has-file { border-color: #7c5cfc; border-style: solid; background: rgba(124,92,252,0.04); }
+  .drop-zone h2 { font-size: 18px; font-weight: 500; margin-bottom: 8px; }
+  .drop-zone p { color: #666; font-size: 13px; }
+  .drop-zone input { display: none; }
+
+  .mode-selector {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin: 24px 0;
+  }
+  .mode-btn {
+    padding: 10px 28px;
+    border: 1px solid #333;
+    border-radius: 10px;
+    background: #1a1a24;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .mode-btn:hover { border-color: #555; }
+  .mode-btn.active { border-color: #7c5cfc; background: rgba(124,92,252,0.12); color: #fff; }
+
+  .progress-container {
+    max-width: 600px;
+    width: 100%;
+    margin-top: 20px;
+    display: none;
+  }
+  .progress-bar-bg {
+    width: 100%;
+    height: 6px;
+    background: #1a1a24;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: #7c5cfc;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-text { margin-top: 8px; font-size: 13px; color: #888; }
+
+  .result { margin-top: 24px; display: none; text-align: center; }
+  .result a {
+    display: inline-block;
+    padding: 12px 32px;
+    background: #7c5cfc;
+    color: #fff;
+    text-decoration: none;
+    border-radius: 10px;
+    font-weight: 500;
+    font-size: 14px;
+    transition: background 0.15s;
+  }
+  .result a:hover { background: #6a4be8; }
+
+  .error-box {
+    margin-top: 24px;
+    padding: 14px 20px;
+    background: rgba(220,50,50,0.12);
+    border: 1px solid rgba(220,50,50,0.3);
+    border-radius: 10px;
+    color: #f06060;
+    font-size: 13px;
+    max-width: 600px;
+    display: none;
+  }
+
+  .file-info {
+    margin-top: 12px;
+    font-size: 13px;
+    color: #aaa;
+    display: none;
+  }
+
+  .model-selector {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .model-btn {
+    padding: 8px 18px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    background: #1a1a24;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s;
+  }
+  .model-btn:hover { border-color: #555; }
+  .model-btn.active { border-color: #a78bfa; background: rgba(167,139,250,0.12); color: #fff; }
+  .model-label {
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Anime4K Upscaler</h1>
+<p class="subtitle">Upscale anime videos — HD 1080p or UHD 4K</p>
+
+<div class="drop-zone" id="dropZone">
+  <h2>Drop a video here</h2>
+  <p>or click to browse — max 5 GB</p>
+  <input type="file" id="fileInput" accept="video/*">
+  <div class="file-info" id="fileInfo"></div>
+</div>
+
+<div class="mode-selector">
+  <button class="mode-btn active" data-mode="hd">HD (1080p)</button>
+  <button class="mode-btn" data-mode="4k">UHD 4K</button>
+</div>
+
+<div class="model-label">Model</div>
+<div class="model-selector">
+  <button class="model-btn" data-model="acnet-gan">Rapide</button>
+  <button class="model-btn active" data-model="arnet-b64-ls">Lignes nettes</button>
+  <button class="model-btn" data-model="artcnn-c4f32">Qualité max</button>
+</div>
+
+<div class="progress-container" id="progressContainer">
+  <div class="progress-bar-bg">
+    <div class="progress-bar-fill" id="progressFill"></div>
+  </div>
+  <div class="progress-text" id="progressText">Starting...</div>
+</div>
+
+<div class="error-box" id="errorBox"></div>
+
+<div class="result" id="result">
+  <a href="#" id="downloadLink" download>Download Upscaled Video</a>
+</div>
+
+<script>
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const fileInfo = document.getElementById('fileInfo');
+  const progressContainer = document.getElementById('progressContainer');
+  const progressFill = document.getElementById('progressFill');
+  const progressText = document.getElementById('progressText');
+  const errorBox = document.getElementById('errorBox');
+  const result = document.getElementById('result');
+  const downloadLink = document.getElementById('downloadLink');
+  const modeBtns = document.querySelectorAll('.mode-btn');
+  const modelBtns = document.querySelectorAll('.model-btn');
+
+  let selectedMode = 'hd';
+  let selectedModel = 'arnet-b64-ls';
+  let selectedFile = null;
+  let pollTimer = null;
+
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      modeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedMode = btn.dataset.mode;
+    });
+  });
+
+  modelBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      modelBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedModel = btn.dataset.model;
+    });
+  });
+
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  });
+  ['dragleave', 'drop'].forEach(evt => {
+    dropZone.addEventListener(evt, e => { e.preventDefault(); dropZone.classList.remove('dragover'); });
+  });
+
+  dropZone.addEventListener('drop', e => {
+    const files = e.dataTransfer.files;
+    if (files.length > 0) setFile(files[0]);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) setFile(fileInput.files[0]);
+  });
+
+  function setFile(file) {
+    if (!file.type.startsWith('video/')) {
+      showError('Please select a video file.');
+      return;
+    }
+    selectedFile = file;
+    fileInfo.textContent = `${file.name} (${formatSize(file.size)})`;
+    fileInfo.style.display = 'block';
+    dropZone.classList.add('has-file');
+    dropZone.querySelector('h2').textContent = 'Click to process';
+    dropZone.querySelector('p').textContent = 'or drop another video to replace';
+    hideError();
+    hideResult();
+    uploadFile();
+  }
+
+  async function uploadFile() {
+    progressContainer.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Uploading...';
+
+    const form = new FormData();
+    form.append('file', selectedFile);
+    form.append('mode', selectedMode);
+    form.append('model', selectedModel);
+
+    try {
+      const res = await fetch('/upload', { method: 'POST', body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Upload failed (${res.status})`);
+      }
+      const data = await res.json();
+      pollStatus(data.task_id);
+    } catch (err) {
+      showError(err.message);
+      progressContainer.style.display = 'none';
+    }
+  }
+
+  function pollStatus(taskId) {
+    progressText.textContent = 'Processing on GPU...';
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/status/${taskId}`);
+        if (!res.ok) { clearInterval(pollTimer); showError('Status check failed'); return; }
+        const job = await res.json();
+
+        progressFill.style.width = job.progress + '%';
+        if (job.status === 'uploaded') progressText.textContent = 'Queued...';
+        else if (job.status === 'processing') progressText.textContent = `Processing on GPU... ${job.progress}%`;
+        else if (job.status === 'done') {
+          clearInterval(pollTimer);
+          progressText.textContent = 'Done!';
+          progressFill.style.width = '100%';
+          downloadLink.href = `/download/${taskId}`;
+          downloadLink.download = `upscaled_${selectedFile.name}`;
+          result.style.display = 'block';
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          progressContainer.style.display = 'none';
+          showError(job.error || 'Processing failed');
+        }
+      } catch {
+        clearInterval(pollTimer);
+        showError('Connection lost');
+      }
+    }, 1500);
+  }
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+  function hideError() { errorBox.style.display = 'none'; }
+  function hideResult() { result.style.display = 'none'; }
+  function formatSize(bytes) {
+    if (bytes > 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+    if (bytes > 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+    return (bytes / 1e3).toFixed(1) + ' KB';
+  }
+</script>
+</body>
+</html>
